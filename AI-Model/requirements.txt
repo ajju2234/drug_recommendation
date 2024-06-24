@@ -1,6 +1,6 @@
 py2neo
 streamlit
-langchain_community.llms
-langchain_community.embeddings
+langchain_community-llms
+langchain_community-embeddings
 langchain_chroma
 dataclasses
