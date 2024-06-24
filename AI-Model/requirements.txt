@@ -1,0 +1,4 @@
+py2neo
+streamlit
+langchain_community
+langchain_chroma
