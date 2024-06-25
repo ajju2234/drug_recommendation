@@ -7,3 +7,5 @@ langchain-community
 opentelemetry-api
 opentelemetry-sdk
 protobuf==3.20.1  # specify a compatible version for protobuf
+langchain-core
+langchain-openai
