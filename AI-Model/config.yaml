@@ -1,0 +1,4 @@
+neo4j:
+  uri: "neo4j+ssc://b6ab63dc.databases.neo4j.io:7687"
+  user: "neo4j"
+  password: "TgdQqkWal9xptiJ_XM3ixoqZ4T0D9bpPgWWJH1Lxcmg"

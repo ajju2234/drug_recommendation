@@ -1,68 +1,29 @@
 import streamlit as st
 from dataclasses import dataclass
 from py2neo import Graph
- 
 from langchain_community.llms import Ollama
 from langchain_community.embeddings import OllamaEmbeddings
 from langchain_chroma import Chroma
 import re
+import yaml
 
-USER = "user"
-MESSAGES = 'message'
-ASSISTANT = 'ai'
- 
-custom_css = """
-<style>
-.chat-container {
-    border: 1px solid #ccc;
-    padding: 10px;
-    border-radius: 10px;
-    max-height: 400px;
-    overflow-y: auto;
-    background-color: #f9f9f9;
-}
-.user-message, .assistant-message {
-    padding: 8px;
-    border-radius: 8px;
-    margin-bottom: 10px;
-}
-.user-message {
-    background-color: #007bff;
-    color: white;
-    text-align: right;
-}
-.assistant-message {
-    background-color: #e2e2e2;
-    color: black;
-    text-align: left;
-}
-/* Custom spinner styles */
-[data-testid="stStatusWidget"] div {
-    color: blue; /* Change the color of the spinner text */
-    font-size: 16px; /* Change the font size */
-    font-style: italic; /* Change the font style to italic */
-}
-</style>
-"""
-# Apply the custom CSS styles
-st.markdown(custom_css, unsafe_allow_html=True)
- 
-@dataclass
-class Message:
-    actor: str
-    payload: str
+# Load configuration
+def load_config():
+    with open("config.yaml", "r") as file:
+        return yaml.safe_load(file)
 
-NEO4J_URI = 'neo4j+ssc://b6ab63dc.databases.neo4j.io:7687'
-NEO4J_USERNAME = 'neo4j'
-NEO4J_PASSWORD = 'TgdQqkWal9xptiJ_XM3ixoqZ4T0D9bpPgWWJH1Lxcmg'
- 
-auth=(NEO4J_USERNAME, NEO4J_PASSWORD)
-graph = Graph(NEO4J_URI, auth=auth)
- 
+config = load_config()
+
+# Neo4j connection
+auth = (config["neo4j"]["user"], config["neo4j"]["password"])
+graph = Graph(config["neo4j"]["uri"], auth=auth)
+
+# Embeddings and LLM
 embeddings = OllamaEmbeddings(model='llama3:8b')
 llm = Ollama(model="llama3:8b")
 db3 = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
- 
+
+# Extract symptoms from query
 def extract_symptoms_from_query(query):
     pattern = r'WHERE s\.name IN \[(.*?)\]'
     match = re.search(pattern, query, re.IGNORECASE)
@@ -70,41 +31,17 @@ def extract_symptoms_from_query(query):
         symptoms_str = match.group(1)
         symptoms = [symptom.strip().strip('"').strip("'") for symptom in symptoms_str.split(',')]
         return symptoms
-    else:
-        return None
- 
+    return None
+
+# Read query from Neo4j
 def read_query(query):  
     try:
         result = graph.run(query)
-    except:
-        result = "Can't give you output right now."
+    except Exception as e:
+        result = str(e)
     return result
- 
-node_properties_query = """
-CALL apoc.meta.data()
-YIELD label, other, elementType, type, property
-WHERE NOT type = "RELATIONSHIP" AND elementType = "node"
-WITH label AS nodeLabels, collect(property) AS properties
-RETURN {labels: nodeLabels, properties: properties} AS output
-"""
-node_props = read_query(node_properties_query)
- 
-rel_query = """
-CALL apoc.meta.data()
-YIELD label, other, elementType, type, property
-WHERE type = "RELATIONSHIP" AND elementType = "node"
-RETURN {source: label, relationship: property, target: other} AS output
-"""
-rels = read_query(rel_query)
- 
-schema = f"""
-Nodes and their properties are the following:
-{node_props}
- 
-The relationships are the following:
-{rels}
-"""
- 
+
+# Generate Cypher query from prompt
 def generate_cypher_query(prompt):
     system_prompt = f"""
     You are an experienced graph databases developer.
@@ -118,7 +55,6 @@ def generate_cypher_query(prompt):
     ### The Schema
     {schema}
     ### ONLY PROVIDE THE CYPHER TEXT NO EXPLANATION NOTHING
-    ### Consider that all the nodes values are in lowercase latters and type of the node starts with capital latter followed by small latters.
     ### Example
     Question:
     ->find alternate of zometa drug
@@ -132,7 +68,8 @@ def generate_cypher_query(prompt):
     """
     response = llm.invoke(system_prompt)
     return response
- 
+
+# Process response
 def process_response(response):
     if 's.name IN' in response:
         symptoms = extract_symptoms_from_query(response)
@@ -146,41 +83,42 @@ def process_response(response):
     else:
         ans = read_query(response)
     return ans
- 
+
+# Generate natural language from results
 def generate_natural_language_from_results(results):
     formatted_results = "\n".join([str(result) for result in results])
     nl_prompt = f"""
     You are an AI language model specifically designed for recommendation.
     Convert the following Cypher query results into a natural language description.
     Description should be a brief paragraph and patient friendly as a doctor is recommending something to a patient.
- 
+
     Results:
     {formatted_results}
- 
+
     Description:
     """
     nl_response = llm.invoke(nl_prompt)
     return nl_response
- 
+
 # Streamlit app starts here
 def main():
     st.title("Drug recommendation system")
- 
+
     api_key = st.text_input("Insert API Key")
- 
+
     if api_key:
         start_time = st.session_state.get('start_time')
         if start_time is None:
             bot = None
             st.session_state['main_obj'] = bot
- 
+
         if MESSAGES not in st.session_state:
-            st.session_state[MESSAGES]= [Message(actor=ASSISTANT, payload="Hi!")]
- 
+            st.session_state[MESSAGES] = [Message(actor=ASSISTANT, payload="Hi!")]
+
         msg: Message
         for msg in st.session_state[MESSAGES]:
             st.chat_message(msg.actor).write(msg.payload)
- 
+
         prompt: str = st.chat_input("Enter here")
         if prompt:
             st.session_state[MESSAGES].append(Message(actor=USER, payload=prompt))
@@ -198,6 +136,6 @@ def main():
                     response = "No results found."
                 st.session_state[MESSAGES].append(Message(actor=ASSISTANT, payload=response))
                 st.chat_message(ASSISTANT).write(response)
- 
+
 if __name__ == "__main__":
     main()
